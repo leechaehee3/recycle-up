@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 분리배출 도우미 (오류해결판)</title>
+    <style>
+        body { font-family: 'Pretendard', sans-serif; text-align: center; padding: 20px; background-color: #f4f7f6; }
+        
+        /* 컨테이너 및 버튼 스타일 */
+        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .btn { width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .btn-primary { background-color: #4a90e2; color: white; }
+        .btn-secondary { background-color: #50e3c2; color: #333; }
+        .btn-warning { background-color: #ff9f43; color: white; display: none; }
+        .btn-retry { background-color: #6c5ce7; color: white; display: none; }
+        .btn:hover { opacity: 0.9; }
+
+        #webcam-container { margin-top: 15px; border-radius: 10px; overflow: hidden; display: none; }
+        #image-preview { max-width: 100%; border-radius: 10px; margin-top: 15px; display: none; }
+        
+        /* 결과창 스타일 */
+        #result-area { 
+            margin-top: 30px; padding: 20px; background: #e8f5e9; border: 2px solid #4caf50; 
+            border-radius: 10px; min-height: 50px; font-size: 20px; font-weight: bold; 
+            white-space: pre-line; color: #2e7d32; 
+        }
+        #file-input { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>♻️ AI 분리배출 도우미</h2>
+    
+    <div id="status-msg" style="color: red; font-size: 14px; margin-bottom: 10px;"></div>
+
+    <div id="webcam-container"></div>
+    <img id="image-preview" alt="이미지 미리보기" />
+
+    <button class="btn btn-primary" id="start-btn" onclick="startCamera()">📸 카메라 켜기</button>
+    <button class="btn btn-warning" id="snap-btn" onclick="snapAndAnalyze()">📷 찰칵! 분석하기</button>
+    <button class="btn btn-retry" id="retry-btn" onclick="startCamera()">🔄 다른 물건 다시 찍기</button>
+    
+    <button class="btn btn-secondary" onclick="document.getElementById('file-input').click()">📁 사진 업로드하기</button>
+    <input type="file" id="file-input" accept="image/*" onchange="handleFileUpload(event)">
+
+    <div id="result-area">분리배출 할 물건을 촬영하거나 업로드해주세요.</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+<script type="text/javascript">
+    // ▼▼▼ [수정 1] 티처블 머신 주소 (마지막에 / 꼭 붙여주세요) ▼▼▼
+    const URL = "https://teachablemachine.withgoogle.com/models/K4CzbP-UN/";
+
+    // ▼▼▼ [수정 2] 앱스크립트 주소 ▼▼▼
+    const SHEET_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbzj5-fooZWD2uGpF_PP1BcBePP_p54V2KeWLnID55wzlKrH05O-yQK8IInVOtA-i-E4/exec";
+
+    let model, webcam, maxPredictions;
+    let isCameraOn = false;
+
+    // 0. 파일 실행 방식 체크 (경고 메시지용)
+    window.onload = function() {
+        if (window.location.protocol === 'file:') {
+            document.getElementById('status-msg').innerText = "⚠️ 주의: HTML 파일을 직접 열면 카메라가 차단될 수 있습니다.\n카메라가 안 켜지면 '사진 업로드' 기능을 사용하거나\n이 파일을 웹 서버(Github 등)에 올려야 합니다.";
+        }
+        loadModel();
+    };
+
+    // 1. 모델 로딩 (상세한 오류 체크 추가)
+    async function loadModel() {
+        const modelURL = URL + "model.json";
+        const metadataURL = URL + "metadata.json";
+        try {
+            document.getElementById('result-area').innerText = "모델 로딩 중...";
+            model = await tmImage.load(modelURL, metadataURL);
+            maxPredictions = model.getTotalClasses();
+            document.getElementById('result-area').innerText = "준비 완료! 카메라를 켜주세요.";
+            console.log("모델 로딩 성공");
+        } catch (e) {
+            alert("❌ 모델을 불러오지 못했습니다!\n주소가 정확한지 확인해주세요.\n\n에러내용: " + e);
+            document.getElementById('result-area').innerText = "모델 로딩 실패 (주소 확인 필요)";
+        }
+    }
+
+    // 2. 카메라 켜기 (강력한 오류 잡기 추가)
+    async function startCamera() {
+        if (!model) {
+            alert("모델이 아직 로딩되지 않았습니다. 잠시만 기다려주세요.");
+            return;
+        }
+
+        try {
+            // 화면 정리
+            document.getElementById('image-preview').style.display = 'none';
+            const container = document.getElementById('webcam-container');
+            container.style.display = 'block';
+            container.innerHTML = ""; // 기존 영상 제거하고 새로 시작
+
+            // 웹캠 설정 시도
+            const flip = true; 
+            webcam = new tmImage.Webcam(300
